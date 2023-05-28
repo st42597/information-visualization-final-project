@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Solar Power Visualization</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+  </head>
+  <body>
+    <header
+      class="flex justify-center items-center h-16 w-full bg-light border-b-[1px] border-gray-300"
+    >
+      <h1 class="text-2xl text-[#37447E]">Solar Power Visualization</h1>
+    </header>
+    <div class="flex flex-col justify-center items-center">
+      <div class="w-full h-full flex justify-center items-center">
+        <div class="flex flex-col">
+          <svg class="day-chart"></svg>
+          <svg class="hour-chart"></svg>
+        </div>
+        <svg class="content"></svg>
+      </div>
+      <div id="selected-table" class="h-80 overflow-auto"></div>
+    </div>
+
+    <script>
+      let _dayChart, _hourChart, _scatterPlot;
+      let [d0, d1] = [new Date(0, 0, 0, 0, 0), new Date(0, 0, 0, 0, 0)];
+      let [h0, h1] = [new Date(0, 0, 0, 0, 0), new Date(0, 0, 0, 0, 0)];
+      let data, dayBrushedData, hourBrushedData;
+      let scatterBrush;
+      function loadCsvData() {
+        d3.csv("data.csv").then((csvData) => {
+          csvData.forEach((d) => {
+            const t = d["DATE_TIME"];
+            const year = t.slice(6, 10);
+            const month = t.slice(3, 5);
+            const day = t.slice(0, 2);
+            const hour = t.slice(11, 13);
+            const minute = t.slice(14, 16);
+            const date = new Date(year, Number(month) - 1, day);
+            d["DATE"] = date;
+            d["DATE_TIME"] = new Date(
+              year,
+              Number(month) - 1,
+              day,
+              hour,
+              minute
+            );
+            d["DAILY_YIELD"] = Number(d["DAILY_YIELD"]);
+            d["AC_POWER"] = Number(d["AC_POWER"]);
+          });
+          data = csvData;
+          _scatterPlot = scatterPlot();
+          _hourChart = hourChart();
+          _dayChart = dayChart();
+        });
+      }
+
+      function dayChart() {
+        let svg;
+        let line;
+        let xAxis;
+        let yAxis;
+        let dayData;
+
+        let width = 500,
+          height = 150;
+        let margin = { top: 50, right: 50, bottom: 50, left: 50 };
+
+        let xScale, yScale;
+
+        function initialize() {
+          svg = d3.select(".day-chart");
+          line = svg.append("g");
+          xAxis = svg.append("g");
+          yAxis = svg.append("g");
+
+          xScale = d3.scaleTime();
+          yScale = d3.scaleLinear();
+
+          svg
+            .attr("width", width + margin.left + margin.right)
+            .attr("height", height + margin.top + margin.bottom);
+
+          line.attr("transform", `translate(${margin.left}, ${margin.top})`);
+        }
+
+        function update() {
+          dayData = [];
+          for (let i = 0; i < data.length; i++) {
+            const curr = data[i];
+            let j;
+            for (j = 0; j < dayData.length; j++) {
+              if (
+                dayData[j].time.getMonth() === curr["DATE_TIME"].getMonth() &&
+                dayData[j].time.getDate() === curr["DATE_TIME"].getDate()
+              ) {
+                break;
+              }
+            }
+            if (j === dayData.length) {
+              if (curr["DATE_TIME"] == "Invalid Date") continue;
+              dayData.push({
+                time: new Date(
+                  2020,
+                  curr["DATE_TIME"].getMonth(),
+                  curr["DATE_TIME"].getDate(),
+                  15
+                ),
+                ac_power: 0,
+              });
+            }
+          }
+
+          for (let i = 0; i < data.length; i++) {
+            const curr = data[i];
+            for (let j = 0; j < dayData.length; j++) {
+              if (
+                dayData[j].time.getMonth() === curr["DATE_TIME"].getMonth() &&
+                dayData[j].time.getDate() === curr["DATE_TIME"].getDate()
+              ) {
+                dayData[j].ac_power += Number(curr["AC_POWER"]);
+                break;
+              }
+            }
+          }
+
+          xScale = d3
+            .scaleTime()
+            .domain(d3.extent(dayData, (d) => d.time))
+            .range([0, width]);
+          yScale = d3
+            .scaleLinear()
+            .domain(d3.extent(dayData, (d) => d.ac_power))
+            .range([height, 0]);
+
+          line
+            .append("path")
+            .datum(dayData)
+            .attr("fill", "none")
+            .attr("stroke", "steelblue")
+            .attr("stroke-width", 1.5)
+            .attr(
+              "d",
+              d3
+                .line()
+                .x((d) => xScale(d.time))
+                .y((d) => yScale(d.ac_power))
+            );
+
+          const brush = d3
+            .brushX()
+            .extent([
+              [margin.left, margin.top],
+              [width + margin.right, height + margin.bottom],
+            ])
+            .on("start brush end", brushed);
+
+          svg.append("g").call(brush).call(brush.move);
+
+          function brushed({ selection }) {
+            if (selection === null) {
+            } else {
+              [d0, d1] = selection.map((d) => xScale.invert(d - margin.left));
+              _scatterPlot();
+              _hourChart();
+            }
+          }
+
+          xAxis
+            .attr(
+              "transform",
+              `translate(${margin.left}, ${margin.top + height})`
+            )
+            .transition()
+            .call(d3.axisBottom(xScale));
+
+          yAxis
+            .attr("transform", `translate(${margin.left}, ${margin.top})`)
+            .transition()
+            .call(
+              d3
+                .axisLeft(yScale)
+                .ticks(7)
+                .tickFormat(function (d) {
+                  if (d / 1000 >= 1) {
+                    d = d / 1000 + "K";
+                  }
+                  return d;
+                })
+            );
+        }
+
+        initialize();
+        update();
+      }
+
+      function hourChart() {
+        let svg;
+        let line;
+        let xAxis;
+        let yAxis;
+        let hourData;
+
+        let width = 500,
+          height = 150;
+        let margin = { top: 50, right: 50, bottom: 50, left: 50 };
+
+        let xScale, yScale;
+
+        function initialize() {
+          svg = d3.select(".hour-chart").html(null);
+          line = svg.append("g");
+          xAxis = svg.append("g");
+          yAxis = svg.append("g");
+
+          xScale = d3.scaleTime();
+          yScale = d3.scaleLinear();
+
+          svg
+            .attr("width", width + margin.left + margin.right)
+            .attr("height", height + margin.top + margin.bottom);
+
+          line.attr("transform", `translate(${margin.left}, ${margin.top})`);
+        }
+
+        function loadHourData() {
+          hourData = [];
+          for (let i = 0; i < 24; i++) {
+            for (let j = 0; j < 60; j += 15) {
+              hourData.push({
+                time: new Date(2020, 0, 1, i, j, 0),
+                ac_power: 0,
+              });
+            }
+          }
+          for (let i = 0; i < data.length; i++) {
+            const curr = data[i];
+            if (curr["DATE"] < d0 || d1 < curr["DATE"]) continue;
+            for (let j = 0; j < hourData.length; j++) {
+              if (
+                hourData[j].time.getHours() === curr["DATE_TIME"].getHours() &&
+                hourData[j].time.getMinutes() === curr["DATE_TIME"].getMinutes()
+              ) {
+                hourData[j].ac_power += Number(curr["AC_POWER"]);
+                break;
+              }
+            }
+          }
+          xScale = d3
+            .scaleTime()
+            .domain(d3.extent(hourData, (d) => d["time"]))
+            .range([0, width]);
+          yScale = d3
+            .scaleLinear()
+            .domain(d3.extent(hourData, (d) => d["ac_power"]))
+            .range([height, 0]);
+          line
+            .selectAll("path")
+            .datum(hourData)
+            .transition()
+            .attr("fill", "none")
+            .attr("stroke", "steelblue")
+            .attr("stroke-width", 1.5)
+            .attr(
+              "d",
+              d3
+                .line()
+                .x((d) => xScale(d["time"]))
+                .y((d) => yScale(d["ac_power"]))
+            );
+
+          xAxis
+            .attr(
+              "transform",
+              `translate(${margin.left}, ${margin.top + height})`
+            )
+            .transition()
+            .call(
+              d3
+                .axisBottom(xScale)
+                .ticks(d3.timeMinute.every(60))
+                .tickFormat(d3.timeFormat("%I"))
+            );
+          yAxis
+            .attr("transform", `translate(${margin.left}, ${margin.top})`)
+            .transition()
+            .call(
+              d3.axisLeft(yScale).tickFormat(function (d) {
+                if (d / 1000 >= 1) {
+                  d = d / 1000 + "K";
+                }
+                return d;
+              })
+            );
+        }
+
+        function update() {
+          xScale = d3
+            .scaleTime()
+            .domain(d3.extent(hourData, (d) => d["time"]))
+            .range([0, width]);
+          yScale = d3
+            .scaleLinear()
+            .domain(d3.extent(hourData, (d) => d["ac_power"]))
+            .range([height, 0]);
+
+          line
+            .append("path")
+            .datum(hourData)
+            .transition()
+            .attr("fill", "none")
+            .attr("stroke", "steelblue")
+            .attr("stroke-width", 1.5)
+            .attr(
+              "d",
+              d3
+                .line()
+                .x((d) => xScale(d["time"]))
+                .y((d) => yScale(d["ac_power"]))
+            );
+
+          const brush = d3
+            .brushX()
+            .extent([
+              [margin.left, margin.top],
+              [width + margin.right, height + margin.bottom],
+            ])
+            .on("start brush end", brushed);
+
+          svg.append("g").call(brush).call(brush.move, [3, 5].map(xScale));
+
+          function brushed({ selection }) {
+            if (selection === null) {
+            } else {
+              [h0, h1] = selection.map((d) => xScale.invert(d - margin.left));
+              _scatterPlot();
+            }
+          }
+
+          xAxis
+            .attr(
+              "transform",
+              `translate(${margin.left}, ${margin.top + height})`
+            )
+            .transition()
+            .call(
+              d3
+                .axisBottom(xScale)
+                .ticks(d3.timeMinute.every(60))
+                .tickFormat(d3.timeFormat("%I"))
+            );
+
+          yAxis
+            .attr("transform", `translate(${margin.left}, ${margin.top})`)
+            .transition()
+            .call(
+              d3.axisLeft(yScale).tickFormat(function (d) {
+                if (d / 1000 >= 1) {
+                  d = d / 1000 + "K";
+                }
+                return d;
+              })
+            );
+        }
+
+        initialize();
+        loadHourData();
+        update();
+
+        return loadHourData;
+      }
+
+      function scatterPlot() {
+        let svg;
+        let circle;
+        let brush;
+        let xAxis;
+        let yAxis;
+        let filteredData;
+        let selected = [];
+
+        let width = 500,
+          height = 500;
+        let margin = { top: 50, right: 50, bottom: 50, left: 50 };
+
+        let xScale, yScale;
+
+        function initialize() {
+          svg = d3.select(".content");
+          circle = svg.append("g");
+          xAxis = svg.append("g");
+          yAxis = svg.append("g");
+          brush = svg.append("g");
+
+          xScale = d3.scaleLinear();
+          yScale = d3.scaleLinear();
+
+          svg
+            .attr("width", width + margin.left + margin.right)
+            .attr("height", height + margin.top + margin.bottom);
+
+          circle.attr("transform", `translate(${margin.left}, ${margin.top})`);
+        }
+
+        function loadFilteredData() {
+          filteredData = [];
+          for (let i = 0; i < data.length; i++) {
+            const curr = data[i];
+            if (curr["DATE"] < d0 || d1 < curr["DATE"]) continue;
+            if (curr["DATE_TIME"].getHours() < h0.getHours()) continue;
+            if (
+              curr["DATE_TIME"].getHours() == h0.getHours() &&
+              curr["DATE_TIME"].getMinutes() < h0.getMinutes()
+            )
+              continue;
+            if (curr["DATE_TIME"].getHours() > h1.getHours()) continue;
+            if (
+              curr["DATE_TIME"].getHours() == h1.getHours() &&
+              curr["DATE_TIME"].getMinutes() > h1.getMinutes()
+            )
+              continue;
+            filteredData.push(curr);
+          }
+          filteredData = filteredData.filter((d) => d["AMBIENT_TEMPERATURE"]);
+          xScale = d3
+            .scaleLinear()
+            .domain(d3.extent(filteredData, (d) => d["AMBIENT_TEMPERATURE"]))
+            .range([0, width]);
+
+          yScale = d3
+            .scaleLinear()
+            .domain(d3.extent(filteredData, (d) => d["AC_POWER"]))
+            .range([height, 0]);
+
+          circle
+            .selectAll("circle")
+            .data(filteredData)
+            .join("circle")
+            .transition()
+            .attr("fill", "steelblue")
+            .attr("cx", (d) => xScale(d["AMBIENT_TEMPERATURE"]))
+            .attr("cy", (d) => yScale(d["AC_POWER"]))
+            .attr("r", 3);
+
+          brush
+            .attr("class", "brush")
+            .call(d3.brush().on("brush", updateChart));
+
+          function updateChart() {
+            const extent = d3.brushSelection(this);
+            const tmp = [];
+            circle.selectAll("circle").classed("fill-red-400", (d) => {
+              const flag = isBrushed(
+                extent,
+                xScale(d["AMBIENT_TEMPERATURE"]) + margin.left,
+                yScale(d["AC_POWER"]) + margin.top
+              );
+              if (flag) tmp.push(d);
+              return flag;
+            });
+            selected = tmp;
+            const table = document.getElementById("selected-table");
+            let html = "";
+            selected.map((d) => {
+              /*
+              const node = document.createElement("div");
+              node.textContent =
+                "DATE_TIME: " +
+                d["DATE_TIME"] +
+                " AMBIENT_TEMPERATURE: " +
+                d["AMBIENT_TEMPERATURE"] +
+                " AC_POWER: " +
+                d["AC_POWER"];
+              table.appendChild(node);
+              */
+              html += `<tr><td>${d["DATE_TIME"]
+                .toString()
+                .slice(0, 24)}</td><td>${parseFloat(
+                d["AMBIENT_TEMPERATURE"]
+              ).toFixed(3)}</td><td>${parseFloat(d["AC_POWER"]).toFixed(
+                3
+              )}</td></tr>`;
+            });
+            table.innerHTML =
+              "<table class='border-separate border-spacing-x-8 border-spacing-y-2'><th>Date Time</th><th>Temperature</th><th>Generated Power</th>" +
+              html +
+              "</table>";
+          }
+
+          function isBrushed(brushCoords, cx, cy) {
+            const x0 = brushCoords[0][0];
+            const x1 = brushCoords[1][0];
+            const y0 = brushCoords[0][1];
+            const y1 = brushCoords[1][1];
+            return x0 <= cx && cx <= x1 && y0 <= cy && cy <= y1;
+          }
+
+          xAxis
+            .attr(
+              "transform",
+              `translate(${margin.left}, ${margin.top + height})`
+            )
+            .transition()
+            .call(d3.axisBottom(xScale));
+          yAxis
+            .attr("transform", `translate(${margin.left}, ${margin.top})`)
+            .transition()
+            .call(
+              d3.axisLeft(yScale).tickFormat(function (d) {
+                if (d / 1000 >= 1) {
+                  d = d / 1000 + "K";
+                }
+                return d;
+              })
+            );
+        }
+
+        function update() {
+          xScale = d3
+            .scaleLinear()
+            .domain(d3.extent(filteredData, (d) => d["AMBIENT_TEMPERATURE"]))
+            .range([0, width]);
+          yScale = d3
+            .scaleLinear()
+            .domain(d3.extent(filteredData, (d) => d["AC_POWER"]))
+            .range([height, 0]);
+
+          circle
+            .selectAll("circle")
+            .data(filteredData)
+            .join("circle")
+            .transition()
+            .attr("cx", (d) => xScale(dt["AMBIENT_TEMPERATURE"]))
+            .attr("cy", (d) => yScale(d["AC_POWER"]))
+            .attr("r", 3);
+
+          xAxis
+            .attr(
+              "transform",
+              `translate(${margin.left}, ${margin.top + height})`
+            )
+            .transition()
+            .call(d3.axisBottom(xScale));
+
+          yAxis
+            .attr("transform", `translate(${margin.left}, ${margin.top})`)
+            .transition()
+            .call(
+              d3.axisLeft(yScale).tickFormat(function (d) {
+                if (d / 1000 >= 1) {
+                  d = d / 1000 + "K";
+                }
+                return d;
+              })
+            );
+        }
+
+        initialize();
+        loadFilteredData();
+        update();
+
+        return loadFilteredData;
+      }
+
+      loadCsvData();
+    </script>
+  </body>
+</html>
