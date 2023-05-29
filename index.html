@@ -481,12 +481,14 @@
                 .toString()
                 .slice(0, 24)}</td><td>${parseFloat(
                 d["AMBIENT_TEMPERATURE"]
-              ).toFixed(3)}</td><td>${parseFloat(d["AC_POWER"]).toFixed(
-                3
-              )}</td></tr>`;
+              ).toFixed(2)}</td><td>${parseFloat(
+                d["MODULE_TEMPERATURE"]
+              ).toFixed(2)}</td><td>${parseFloat(d["AC_POWER"]).toFixed(
+                2
+              )}</td><td>${parseFloat(d["DAILY_YIELD"]).toFixed(2)}</td></tr>`;
             });
             table.innerHTML =
-              "<table class='border-separate border-spacing-x-8 border-spacing-y-2'><th>Date Time</th><th>Temperature</th><th>Generated Power</th>" +
+              "<table class='border-separate border-spacing-x-8 border-spacing-y-2'><th>Date Time</th><th>Ambient Temp</th><th>Module Temp</th><th>Generated Power(15m)</th><th>Daily Yield</th>" +
               html +
               "</table>";
           }
